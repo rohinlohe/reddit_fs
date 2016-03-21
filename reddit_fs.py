@@ -9,7 +9,6 @@ import random
 import sys
 
 
-
 from fuse import FUSE, FuseOSError, Operations
 
 
@@ -50,7 +49,15 @@ class RedditFS(Operations):
         return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime','st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
 
     def readdir(self, path, fh):
+        """
+        Ideas: add a /new, /top, etc. to the end of the path if the path is just
+        a single subreddit (eg. /AskReddit/new)
+        Default to what? (new maybe?)
+        """
         dirents = ['.', '..']
+        path_pieces = path.split("/")
+        path_pieces = filter(lambda x: len(x) > 0, path_pieces)
+        print "path pieces is", path_pieces
         if path == "/":
             if self.logged_in:
                 subreddits = self.r.get_my_subreddits(limit=None)
@@ -153,6 +160,7 @@ if __name__ == '__main__':
         user_session = random.randint(0, 5000)
         user_agent = "reddit_fs filesystem " + str(user_session)
     r = praw.Reddit(user_agent)
-    r.login(disable_warning=True)
+    if len(username) > 0:
+        r.login(disable_warning=True)
     FUSE(RedditFS(root, username != "", r), mountpoint, nothreads=True, foreground=True)
     
