@@ -17,7 +17,12 @@ class RedditFS(Operations):
         self.root = root
         self.logged_in = logged_in
         self.r = r
-        
+        if self.logged_in:
+            subreddits = self.r.get_my_subreddits(limit=None)
+        else:
+            subreddits = self.r.default_subreddits(limit=None)
+        self.subreddits = list(subreddits)
+        self.sort_keywords = ["hot", "new", "rising", "controversial", "top"]
     # Helpers
     # =======
         
@@ -48,6 +53,22 @@ class RedditFS(Operations):
         st = os.lstat(full_path)
         return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime','st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
 
+    def get_posts(subreddit, sort_key, num_posts=20):
+        subreddit_target = r.get_subreddit(path_pieces[0])
+        if sort_key == "hot":
+            posts = subreddit_target.get_hot(limit=num_posts)
+        elif sort_key == "new":
+            posts = subreddit_target.get_new(limit=num_posts)
+        elif sort_key == "rising": 
+            posts = subreddit_target.get_rising(limit=num_posts)
+        elif sort_key == "controversial": 
+            posts = subreddit_target.get_controversial(limit=num_posts)
+        elif sort_key == "top": 
+            posts = subreddit_target.get_top(limit=num_posts)
+        else:
+            raise NameError("Invalid subreddit sort key")
+        return posts
+
     def readdir(self, path, fh):
         """
         Ideas: add a /new, /top, etc. to the end of the path if the path is just
@@ -58,14 +79,15 @@ class RedditFS(Operations):
         path_pieces = path.split("/")
         path_pieces = filter(lambda x: len(x) > 0, path_pieces)
         print "path pieces is", path_pieces
-        if path == "/":
-            if self.logged_in:
-                subreddits = self.r.get_my_subreddits(limit=None)
-            else:
-                subreddits = self.r.default_subreddits(limit=None)
-            for s in subreddits:
+        if len(path_pieces) == 0:
+            for s in self.subreddits:
                 dirents.append(s.display_name)
-                
+        elif len(path_pieces) == 1:
+            # give back the 20 newest posts on the subreddit
+            posts = get_posts(path_pieces[0], "new")
+            for post in posts:
+                dirents.append(post.title[:80])
+            
         else:
             full_path = self._full_path(path)
 
