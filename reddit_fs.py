@@ -50,6 +50,7 @@ class RedditFS(Operations):
         if len(path_pieces) == 0:
             return { 'st_mode': stat.S_IFDIR,
                      'st_size': 50}
+        # need to add checks for different levels of the directory tree too
         else:
             return { 'st_mode': stat.S_IFDIR,
                      'st_size': 50}
@@ -58,8 +59,8 @@ class RedditFS(Operations):
         #st = os.lstat(full_path)
         #return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime','st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
 
-    def get_posts(subreddit, sort_key, num_posts=20):
-        subreddit_target = r.get_subreddit(path_pieces[0])
+    def get_posts(self, subreddit, sort_key, num_posts=20):
+        subreddit_target = r.get_subreddit(subreddit)
         if sort_key == "hot":
             posts = subreddit_target.get_hot(limit=num_posts)
         elif sort_key == "new":
@@ -87,17 +88,18 @@ class RedditFS(Operations):
         if len(path_pieces) == 0:
             for s in self.subreddits:
                 dirents.append(s.display_name)
-        elif len(path_pieces) == 1:
-            # give back the 20 newest posts on the subreddit
-            posts = get_posts(path_pieces[0], "new")
+        elif len(path_pieces) == 1 or len(path_pieces) == 2:
+            sort_key = "new" if len(path_pieces) == 1 else path_pieces[1] 
+            posts = self.get_posts(path_pieces[0], sort_key)
             for post in posts:
-                dirents.append(post.title[:80])
+                dirents.append(post.title[:74] + " " + post.id)
             
         else:
-            full_path = self._full_path(path)
+            pass
+            #full_path = self._full_path(path)
 
-            if os.path.isdir(full_path):
-                dirents.extend(os.listdir(full_path))
+            #if os.path.isdir(full_path):
+            #    dirents.extend(os.listdir(full_path))
 
         for r in dirents:
             yield r
@@ -207,5 +209,5 @@ if __name__ == '__main__':
         r.login(username=sys.argv[2], disable_warning=True)
         logged_in = True
 
-    FUSE(RedditFS(r, logged_in), mountpoint, nothreads=True, foreground=True)
+    FUSE(RedditFS(r, logged_in), mountpoint, nothreads=True, foreground=True, debug=True)
     
