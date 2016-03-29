@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env pythonOA
 
 from __future__ import with_statement
 
@@ -44,6 +44,18 @@ class RedditFS(Operations):
         #full_path = self._full_path(path)
         #return os.chown(full_path, uid, gid)
 
+    def is_subreddit(self, name):
+        for sub in self.subreddits:
+            if sub.display_name == name:
+                return True
+        return False
+        
+    def post_to_fname(self, post):
+        return post.title[:74] + " " + post.id
+
+    def comment_to_fname(self, comment):
+        return comment.body[:74] + " " + comment.id
+        
     def getattr(self, path, fh=None):
         path_pieces = path.split("/")
         path_pieces = filter(lambda x: len(x) > 0, path_pieces)
@@ -52,8 +64,12 @@ class RedditFS(Operations):
                      'st_size': 50}
         # need to add checks for different levels of the directory tree too
         else:
-            return { 'st_mode': stat.S_IFDIR,
-                     'st_size': 50}
+            if len(path_pieces) == 1 and self.is_subreddit(path_pieces[0]):
+                return { 'st_mode': stat.S_IFDIR,
+                         'st_size': 50}
+            else:
+                return { 'st_mode': stat.S_IFDIR,
+                         'st_size': 50}
 
         #full_path = self._full_path(path)
         #st = os.lstat(full_path)
@@ -88,14 +104,25 @@ class RedditFS(Operations):
         if len(path_pieces) == 0:
             for s in self.subreddits:
                 dirents.append(s.display_name)
-        elif len(path_pieces) == 1 or len(path_pieces) == 2:
-            sort_key = "new" if len(path_pieces) == 1 else path_pieces[1] 
-            posts = self.get_posts(path_pieces[0], sort_key)
-            for post in posts:
-                dirents.append(post.title[:74] + " " + post.id)
-            
         else:
-            pass
+            if len(path_pieces) == 1:
+                dirents.extend(self.sort_keywords)
+                dirents.append("newpost")
+            else:
+                sort_key = path_pieces[1] 
+                posts = self.get_posts(path_pieces[0], sort_key)
+                if len(path_pieces) == 2:
+                    for post in posts:
+                        dirents.append(self.post_to_fname(post))
+                elif len(path_pieces) == 3:
+                    for post in posts:
+                        if self.post_to_fname(post) == path_pieces[2]:
+                            comments = post.comments
+                    if not 'comments' in locals():
+                        raise OSError(errno.ENOENT)
+                    else:
+                        for comment in comments:
+                            dirents.append(self.comment_to_fname(comment))
             #full_path = self._full_path(path)
 
             #if os.path.isdir(full_path):
@@ -204,7 +231,7 @@ if __name__ == '__main__':
     mountpoint = sys.argv[1]
     logged_in = False
     user_agent = "reddit_fs file system"
-    r = praw.Reddit(user_agent)
+    r = praw.Reddit(user_agent, cache_timeout=60)
     if len(sys.argv) > 2:
         r.login(username=sys.argv[2], disable_warning=True)
         logged_in = True
