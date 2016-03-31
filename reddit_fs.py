@@ -99,30 +99,44 @@ class RedditFS(Operations):
         """
         dirents = ['.', '..']
         path_pieces = path.split("/")
-        path_pieces = filter(lambda x: len(x) > 0, path_pieces)
-        print "path pieces is", path_pieces
+        # when you split "/", you get two empty strings. filter will fix this.
+        path_pieces = filter(lambda x: len(x) > 0, path_pieces) 
+        print "path pieces are", path_pieces
+        # show all subreddits (default or personal) if no path specified.
         if len(path_pieces) == 0:
             for s in self.subreddits:
-                dirents.append(s.display_name)
+                dirents.append(s.display_name) 
         else:
-            if len(path_pieces) == 1:
+            # go one level deep - show 'new', 'rising', etc.
+            if len(path_pieces) == 1: 
                 dirents.extend(self.sort_keywords)
                 dirents.append("newpost")
             else:
+                present = false # boolean to check if comments/posts are present
                 sort_key = path_pieces[1] 
                 posts = self.get_posts(path_pieces[0], sort_key)
                 if len(path_pieces) == 2:
                     for post in posts:
                         dirents.append(self.post_to_fname(post))
-                elif len(path_pieces) == 3:
+                elif len(path_pieces) >= 3:
+                    # walk through the all the posts and see if the path exists
+                    for num_dir in path_pieces:
+                        for post in posts:
+                            if self.post_to_fname(post) == path_pieces[num_dir]:
+                                # if it exists, grab the comments
+                                posts = post.comments 
+                                present = true
+                        # if you walk an invalid/old path name, then hit the error
+                        if not present: 
+                            raise OSError(errno.ENOENT)
+                        present = false
+                    
+                    # finished walking through the path
+                    for comment in comments:
+                        dirents.append(self.comment_to_fname(comment))
+                else:
                     for post in posts:
-                        if self.post_to_fname(post) == path_pieces[2]:
-                            comments = post.comments
-                    if not 'comments' in locals():
-                        raise OSError(errno.ENOENT)
-                    else:
-                        for comment in comments:
-                            dirents.append(self.comment_to_fname(comment))
+                        if self
             #full_path = self._full_path(path)
 
             #if os.path.isdir(full_path):
