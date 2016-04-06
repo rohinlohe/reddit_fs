@@ -32,14 +32,8 @@ class RedditFS(Operations):
     # ==================
             
     def access(self, path, mode):
-        print "EVALUATED AS", self.path_to_object(path)
         if self.path_to_object(path) is None:
             raise FuseOSError(errno.ENOENT)
-        #return 0
-        #pass
-        #full_path = self._full_path(path)
-        #if not os.access(full_path, mode):
-        #    raise FuseOSError(errno.EACCES)
         
     def chmod(self, path, mode):
         pass
@@ -50,12 +44,6 @@ class RedditFS(Operations):
         pass
         #full_path = self._full_path(path)
         #return os.chown(full_path, uid, gid)
-
-    def is_subreddit(self, name):
-        for sub in self.subreddits:
-            if sub.display_name == name:
-                return True
-        return False
 
     def fname_to_id(self, fname):
         """
@@ -82,23 +70,29 @@ class RedditFS(Operations):
         return fname.replace("\n", " ")
         
     def getattr(self, path, fh=None):
-        path_pieces = path.split("/")
-        path_pieces = filter(lambda x: len(x) > 0, path_pieces)
-        if len(path_pieces) == 0:
-            return { 'st_mode': stat.S_IFDIR,
-                     'st_size': 50}
-        # need to add checks for different levels of the directory tree too
-        else:
-            if len(path_pieces) == 1 and self.is_subreddit(path_pieces[0]):
-                return { 'st_mode': stat.S_IFDIR,
-                         'st_size': 50}
-            else:
-                return { 'st_mode': stat.S_IFDIR,
-                         'st_size': 50}
+        path_obj = self.path_to_object(path)
+        if path_obj is None:
+            raise FuseOSError(errno.ENOENT)
 
-        #full_path = self._full_path(path)
-        #st = os.lstat(full_path)
-        #return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime','st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
+        print "PATH OBJ",path_obj
+        path_attrs = {}
+        if path_obj[0] == "special file":
+            path_attrs['st_mode'] = stat.S_IFREG
+            path_attrs['st_size'] = 20
+        else:
+            path_attrs['st_mode'] = stat.S_IFDIR
+            if path_obj[0] == "root":
+                path_attrs['st_size'] = len(self.subreddits)
+            elif path_obj[0] == "subreddit":
+                path_attrs['st_size'] = 5
+            elif path_obj[0] == "sort_key":
+                path_attrs['st_size'] = 20
+            elif path_obj[0] == "post":
+                path_attrs['st_size'] = path_obj[1].num_comments
+            elif path_obj[0] == "comment":
+                # this will be too small if there are MoreComments objects
+                path_attrs['st_size'] = len(path_obj[1].replies)
+        return path_attrs
 
     def get_posts(self, subreddit, sort_key, num_posts=20):
         """
@@ -128,7 +122,6 @@ class RedditFS(Operations):
         all_comments = []
         for comment in comments:
             if type(comment) == praw.objects.MoreComments and comment.count > 0:
-                print "GOING DOWN", comment.comments()
                 all_comments.extend(self.get_all_comments(comment.comments()))
             else:
                 all_comments.append(comment)
@@ -148,7 +141,6 @@ class RedditFS(Operations):
             elif comment.id == comment_id:
                 return comment
         for more_comment in more_comments:
-            print "RECURSING"
             result = find_comment(more_comment.comments(), comment_id)
             if not result is None:
                 return result
@@ -199,7 +191,7 @@ class RedditFS(Operations):
 
         # check if our path has a special comment file
         if len(path_pieces) == 4 and path_pieces[3] in self.comment_files:
-            return "comment file", None
+            return "special file", None
         
         # check if the first comment part of the path exists
         comment_id = self.fname_to_id(path_pieces[3])
@@ -213,7 +205,7 @@ class RedditFS(Operations):
         lower_comment_obj = None
         for i in range(4, len(path_pieces)):
             if len(path_pieces) == i + 1 and path_pieces[i] in self.comment_files:
-                return "comment file", None
+                return "special file", None
             comment_id = self.fname_to_id(path_pieces[i])
             lower_comment_obj = self.find_comment(comment_obj.replies, comment_id)
             if lower_comment_obj is None:
@@ -232,103 +224,42 @@ class RedditFS(Operations):
         a single subreddit (eg. /AskReddit/new)
         Default to what? (new maybe?)
         """
-        #dirents = ['.', '..']
         yield "."
         yield ".."
         path_obj = self.path_to_object(path)
         if path_obj is None:
-            raise OSError(errno.ENOENT)
+            raise FuseOSError(errno.ENOENT)
 
         if path_obj[0] == "root":
             for s in self.subreddits:
-                #dirents.append(s.display_name)
                 yield s.display_name
         
         elif path_obj[0] == "subreddit":
             [(yield key) for key in self.sort_keywords]
-            #dirents.extend(self.sort_keywords)
-            #dirents.append("newpost")
 
         elif path_obj[0] == "sort key":
             path_pieces = path.split("/")
             path_pieces = filter(lambda x: len(x) > 0, path_pieces) 
             posts = self.get_posts(self.r.get_subreddit(path_pieces[0]), path_obj[1])
             for post in posts:
-                #dirents.append(self.post_to_fname(post))
                 yield self.post_to_fname(post)
         elif path_obj[0] == "post" or path_obj[0] == "comment":
             if path_obj[0] == "post":
-                if self.post_to_fname(path_obj[1]) in self.seen_submissions:
-                    comments = self.seen_submissions[self.post_to_fname(path_obj[1])]
-                else:
-                    comments = self.get_all_comments(path_obj[1].comments)
-                    self.seen_submissions[self.post_to_fname(path_obj[1])] = comments
+                comments = self.get_all_comments(path_obj[1].comments)
+                # need to decide if we want to do some sort of "caching" or not
+                #if self.post_to_fname(path_obj[1]) in self.seen_submissions:
+                #    comments = self.seen_submissions[self.post_to_fname(path_obj[1])]
+                #else:
+                #    comments = self.get_all_comments(path_obj[1].comments)
+                #    self.seen_submissions[self.post_to_fname(path_obj[1])] = comments
             else:
                 comments = self.get_all_comments(path_obj[1].replies)
             for comment in comments:
-                #dirents.append(self.comment_to_fname(comment))
                 yield self.comment_to_fname(comment)
-            print "COMMENTS LENGTH", len(comments), comments
             if len(comments) == 0:
                 yield "no comments"
-        # path_obj[0] must be "special file"
-        else:
-            pass
-        #for r in dirents:
-        #    yield r
-            
-        """path_pieces = path.split("/")
-        # when you split "/", you get two empty strings. filter will fix this.
-        path_pieces = filter(lambda x: len(x) > 0, path_pieces) 
-        # show all subreddits (default or personal) if given path is the root.
-        if len(path_pieces) == 0:
-            for s in self.subreddits:
-                dirents.append(s.display_name) 
-        else:
-            # go one level deep - show 'new', 'rising', etc.
-            if len(path_pieces) == 1: 
-                dirents.extend(self.sort_keywords)
-                dirents.append("newpost")
-            else:
-                present = False # boolean to check if comments/posts are present
-                sort_key = path_pieces[1] 
-                posts = self.get_posts(path_pieces[0], sort_key)
-                if len(path_pieces) == 2:
-                    for post in posts:
-                        dirents.append(self.post_to_fname(post))
-                    
-                elif len(path_pieces) > 2:
-                    # walk through the all the posts and see if the path exists
-                    for post in posts:
-                        if self.post_to_fname(post) == path_pieces[2]:
-                            comments = post.comments
-                            present = True
-                    if not present:
-                        raise OSError(errno.ENOENT)
-                    
-                    for i in range(3, len(path_pieces)):
-                        for comment in comments:
-                            if self.post_to_fname(post) == path_pieces[i]:
-                                # if it exists, grab the comments
-                                comments = comment.comments 
-                                present = True
-                        # if you walk an invalid/old path name, then hit the error
-                        if not present: 
-                            raise OSError(errno.ENOENT)
-                        present = False
-                    
-                    # finished walking through the path
-                    for comment in comments:
-                        dirents.append(self.comment_to_fname(comment))
-               # else:
-               #     for post in posts:
-               #         if self
-            #full_path = self._full_path(path)
-
-            #if os.path.isdir(full_path):
-            #    dirents.extend(os.listdir(full_path))
-        """
-
+        elif path_obj[0] == "special file":
+            raise FuseOSError(errno.ENOTDIR)
 
     def readlink(self, path):
         pass
