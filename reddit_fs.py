@@ -8,6 +8,8 @@ import praw
 import random
 import sys
 import stat
+import urllib2
+import html2text
 
 
 from fuse import FUSE, FuseOSError, Operations
@@ -145,6 +147,17 @@ class RedditFS(Operations):
             if not result is None:
                 return result
         return None
+
+
+    def get_html(self, url):
+        # read the url
+        req = urllib2.Request(url);
+        response = urllib2.urlopen(req)
+        htmltext = response.read()
+        # extract the html code 
+        unicode_content = htmltext.decode('utf-8')
+        final = html2text.html2text(unicode_content)
+        return final
                                 
     def path_to_object(self, path):
         """
