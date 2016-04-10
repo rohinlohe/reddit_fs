@@ -37,26 +37,32 @@ class RedditFS(Operations):
         if self.path_to_object(path) is None:
             raise FuseOSError(errno.ENOENT)
         
-    def chmod(self, path, mode):
-        pass
+    #def chmod(self, path, mode):
+    #    pass
         #full_path = self._full_path(path)
         #return os.chmod(full_path, mode)
         
-    def chown(self, path, uid, gid):
-        pass
+    #def chown(self, path, uid, gid):
+    #    pass
         #full_path = self._full_path(path)
         #return os.chown(full_path, uid, gid)
 
-    def fname_to_id(self, fname):
+    def post_fname_to_id(self, fname):
         """
-        Extracts the post/comment id portion from a directory name.
+        Extracts the post id portion from a directory name.
         """
-        return fname[75:]
+        return fname[-6:]
+
+    def comment_fname_to_id(self, fname):
+        """
+        Extracts the comment id portion from a directory name.
+        """
+        return fname[-7:]
     
     def post_to_fname(self, post):
         """
         Converts a post to a string containing some of the title of the post
-        and the id of the post.
+        and the id of the post (post ids are 6 alpha-numeric characters).
         """
         fname = post.title[:74] + " " + post.id
         fname = fname.replace("/", "|")
@@ -65,9 +71,10 @@ class RedditFS(Operations):
     def comment_to_fname(self, comment):
         """
         Converts a comment to a string containing some of the body of the
-        comment and the id of the comment.
+        comment and the id of the comment (comment ids are 7 alpha-numeric
+        characters).
         """
-        fname = comment.body[:74] + " " + comment.id
+        fname = comment.body[:73] + " " + comment.id
         fname = fname.replace("/", "|")
         return fname.replace("\n", " ")
         
@@ -136,6 +143,7 @@ class RedditFS(Operations):
         searches all comment objects that are not "MoreComments" objects first,
         reducing the expected number of praw calls to be made.
         """
+        print "trying to find comment", comment_id
         more_comments = []
         for comment in comments:
             if type(comment) == praw.objects.MoreComments and comment.count > 0:
@@ -189,6 +197,8 @@ class RedditFS(Operations):
             return "sort key", sort_key
         if sort_key is None:
             return None
+        if len(path_pieces) == 3 and path_pieces[2] == "newpost":
+            return "special file", None
 
         # check if the post part of the path exists
         post_obj = None
@@ -207,7 +217,7 @@ class RedditFS(Operations):
             return "special file", None
         
         # check if the first comment part of the path exists
-        comment_id = self.fname_to_id(path_pieces[3])
+        comment_id = self.comment_fname_to_id(path_pieces[3])
         comment_obj = self.find_comment(post_obj.comments, comment_id)
         if len(path_pieces) == 4 and not comment_obj is None:
             return "comment", comment_obj
@@ -249,6 +259,7 @@ class RedditFS(Operations):
         
         elif path_obj[0] == "subreddit":
             [(yield key) for key in self.sort_keywords]
+            yield "newpost"
 
         elif path_obj[0] == "sort key":
             path_pieces = path.split("/")
@@ -257,6 +268,7 @@ class RedditFS(Operations):
             for post in posts:
                 yield self.post_to_fname(post)
         elif path_obj[0] == "post" or path_obj[0] == "comment":
+            yield "content"
             if path_obj[0] == "post":
                 comments = self.get_all_comments(path_obj[1].comments)
                 # need to decide if we want to do some sort of "caching" or not
@@ -274,8 +286,8 @@ class RedditFS(Operations):
         elif path_obj[0] == "special file":
             raise FuseOSError(errno.ENOTDIR)
 
-    def readlink(self, path):
-        pass
+    #def readlink(self, path):
+    #    pass
         #pathname = os.readlink(self._full_path(path))
         #if pathname.startswith("/"):
             # Path name is absolute, sanitize it.
@@ -283,17 +295,17 @@ class RedditFS(Operations):
         #else:
         #    return pathname
 
-    def mknod(self, path, mode, dev):
-        pass
+    #def mknod(self, path, mode, dev):
+    #    pass
         #return os.mknod(self._full_path(path), mode, dev)
 
-    def rmdir(self, path):
-        pass
+    #def rmdir(self, path):
+    #    pass
         #full_path = self._full_path(path)
         #return os.rmdir(full_path)
 
-    def mkdir(self, path, mode):
-        pass
+    #def mkdir(self, path, mode):
+    #    pass
         #return os.mkdir(self._full_path(path), mode)
     
     def statfs(self, path):
@@ -308,24 +320,24 @@ class RedditFS(Operations):
                 'f_namemax': 80}
     #dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree','f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag','f_frsize', 'f_namemax'))
 
-    def unlink(self, path):
-        pass
+    #def unlink(self, path):
+    #    pass
         #return os.unlink(self._full_path(path))
     
-    def symlink(self, name, target):
-        pass
+    #def symlink(self, name, target):
+    #    pass
         #return os.symlink(name, self._full_path(target))
     
-    def rename(self, old, new):
-        pass
+    #def rename(self, old, new):
+    #    pass
         #return os.rename(self._full_path(old), self._full_path(new))
     
-    def link(self, target, name):
-        pass
+    #def link(self, target, name):
+    #    pass
         #return os.link(self._full_path(target), self._full_path(name))
     
-    def utimens(self, path, times=None):
-        pass
+    #def utimens(self, path, times=None):
+    #    pass
         #return os.utime(self._full_path(path), times)
     
     # File methods
@@ -336,8 +348,8 @@ class RedditFS(Operations):
         #full_path = self._full_path(path)
         #return os.open(full_path, flags)
     
-    def create(self, path, mode, fi=None):
-        pass
+    #def create(self, path, mode, fi=None):
+    #    pass
         #full_path = self._full_path(path)
         #return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
     
@@ -351,22 +363,22 @@ class RedditFS(Operations):
         #os.lseek(fh, offset, os.SEEK_SET)
         #return os.write(fh, buf)
     
-    def truncate(self, path, length, fh=None):
-        pass
+    #def truncate(self, path, length, fh=None):
+    #    pass
         #full_path = self._full_path(path)
         #with open(full_path, 'r+') as f:
         #    f.truncate(length)
             
-    def flush(self, path, fh):
-        pass
+    #def flush(self, path, fh):
+    #    pass
         #return os.fsync(fh)
 
-    def release(self, path, fh):
-        pass
+    #def release(self, path, fh):
+    #    pass
         #return os.close(fh)
     
-    def fsync(self, path, fdatasync, fh):
-        pass
+    #def fsync(self, path, fdatasync, fh):
+    #    pass
         #return self.flush(path, fh)
     
         
