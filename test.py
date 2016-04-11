@@ -2,6 +2,11 @@ import praw
 import random
 import requests
 import pytube
+import pyimgur
+
+CLIENT_ID = "5eb8e583972827f"
+
+
 def find_comment(comments, comment_id):
     more_comments = []
     for comment in comments:
@@ -78,11 +83,20 @@ def process_post(obj):
                         break
                 video = videos[0]
                 video.download("")
+            elif obj.domain == 'imgur.com': # TODO: might run into problems if we try downloading a gif from imgur
+                im = pyimgur.Imgur(CLIENT_ID)
+                url = obj.url
+                url = url.split("/")[-1]
+                image = im.get_image(url)
+                # not specifying path means that the image will be downloaded in current
+                # working directory
+                str(image.download(path="", name="temp", overwrite=True, size=None)) #typecast as string to convert from unicode
             else:
                 f = open("temp.html", "w")
                 f.write(req.content)
                 f.close()
-        
+
+
     #print req.text
     #print req.headers['content-type'] #application/pdf, 
     #for cont in req.iter_content:
