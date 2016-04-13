@@ -74,7 +74,7 @@ def get_gfycat_id(url):
 def get_content_fname(obj):
     if type(obj) == type(""):
         return None
-    mp4_domains = ['youtube.com', 'streamable.com', 'gfycat.com']
+    mp4_domains = ['youtube.com', 'youtu.be', 'streamable.com', 'gfycat.com']
     if type(obj) == praw.objects.Comment or obj.is_self:
         return 'comment' + obj.id + '.txt', '.txt'
     # check that we can access the URL, we give a txt file if we can't
@@ -88,6 +88,8 @@ def get_content_fname(obj):
         return base_fname + '.pdf', '.pdf'
     elif obj.domain in mp4_domains:
         return base_fname + '.mp4', '.mp4'
+    elif obj.domain == 'imgur.com' or obj.domain == 'i.imgur.com':
+        return base_fname + '.jpg', '.jpg'
     else:
         return base_fname + '.html', '.html'
 
@@ -126,7 +128,7 @@ def open_content(obj):
             f.write(req.content)
             size = len(req.content)
         else:
-            if obj.domain == 'youtube.com':
+            if obj.domain == 'youtube.com' or obj.domain == 'youtu.be':
                 #f = open("temp.mp4")
                 yt = pytube.YouTube(obj.url)
                 yt.set_filename("submission" + obj.id)
@@ -139,15 +141,23 @@ def open_content(obj):
                 video.download("")
                 #fname = "submission" + obj.id + '.mp4'
                 f = open(fname, "w")
-                size = os.stat(fname)['st_size']
-            elif obj.domain == 'imgur.com': # TODO: might run into problems if we try downloading a gif from imgur
+                size = os.stat(fname).st_size
+            elif obj.domain == 'imgur.com' or obj.domain == 'i.imgur.com':
+                # TODO: might run into problems if we try downloading a gif from imgur
+                # TODO: imgur urls can end with .gifv (or other extension) in which case we
+                # can download them directly
                 im = pyimgur.Imgur(CLIENT_ID)
                 url = obj.url
                 url = url.split("/")[-1]
+                # check if we have an album
+                if url[-2] == 'a':
+                    pass
                 image = im.get_image(url)
                 # not specifying path means that the image will be downloaded in current
                 # working directory
-                str(image.download(path="", name="submission" + obj.id, overwrite=True, size=None)) #typecast as string to convert from unicode
+                str(image.download(path="", name=fname[:len(fname) - 4], overwrite=True, size=None)) #typecast as string to convert from unicode
+                f = open(fname, "r")
+                size = os.stat(fname).st_size
                 # TODO figure out size
             elif obj.domain == 'streamable.com':
                 # get the id of the video and make API request
@@ -190,18 +200,21 @@ def open_content(obj):
 
 if __name__ == "__main__":
     r = praw.Reddit("testing /u/sweet_n_sour_curry", api_request_delay=1.0)
-    self_sub = r.get_submission(submission_id="4e8z8t") #4e8q3w
-    pdf_sub = r.get_submission(submission_id="3ui1d4")
-    otherlink_sub = r.get_submission(submission_id="4eg3df")
-    youtube_sub = r.get_submission(submission_id="4e5pmj")
-    streamable_sub = r.get_submission(submission_id="4e8gw4")
-    #soundcloud_sub = r.get_submission(submission_id="4eaxqt")
-    gfycat_sub = r.get_submission(submission_id="4egtz7")
+    imgur_sub = r.get_submission(submission_id="4eift7") #album 4ei4da
+    #self_sub = r.get_submission(submission_id="4e8z8t") #4e8q3w
+    #pdf_sub = r.get_submission(submission_id="3ui1d4")
+    #otherlink_sub = r.get_submission(submission_id="4eg3df")
+    #youtube_sub = r.get_submission(submission_id="4e5pmj")
+    #streamable_sub = r.get_submission(submission_id="4e8gw4")
+    #gfycat_sub = r.get_submission(submission_id="4egtz7")
 
+    #soundcloud_sub = r.get_submission(submission_id="4eaxqt")
+
+    
     #print list(first_n(5))
     #print list(random_nums())
     #print list(random_nums2())
-    f1, fname1, size = open_content(self_sub)
+    f1, fname1, size = open_content(imgur_sub)
     #process_post(pdf_sub)
     #process_post(otherlink_sub)
     #process_post(youtube_sub)
@@ -209,7 +222,7 @@ if __name__ == "__main__":
     #process_post(soundcloud_sub)
     #process_post(gfycat_sub)
     print f1, fname1, size
-    print get_content_fname(self_sub)
+    print get_content_fname(imgur_sub)
     """
     submission = r.get_submission(submission_id = "4deewb")
     comments = submission.comments
