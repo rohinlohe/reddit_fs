@@ -97,11 +97,21 @@ class RedditFS(Operations):
         if path_objs[-1] in self.comment_files:
         #if path_obj[0] == "special file":
             path_attrs['st_mode'] = stat.S_IFREG
-            fname = get_content_fname(path_objs[-2])
+            fname, ext = get_content_fname(path_objs[-2])
             if fname in self.open_files:
                 path_attrs['st_size'] = self.open_files[fname][1]
             else:
-                path_attrs['st_size'] = 20
+                #path_objs = self.path_to_objects(path)
+                #if path_objs is None:
+                #    raise FuseOSError(errno.ENOENT)
+                #if path_objs[-1] not in self.comment_files:
+                #    raise FuseOSError(errno.EISDIR)
+                f, fname, size = open_content(path_objs[-2])
+                self.open_files[fname] = f, size
+                path_attrs['st_size'] = size
+                #return f
+
+                #path_attrs['st_size'] = 20
         else:
             path_attrs['st_mode'] = stat.S_IFDIR
             #if path_obj[0] == "root":
@@ -383,9 +393,14 @@ class RedditFS(Operations):
             raise FuseOSError(errno.ENOENT)
         if path_objs[-1] not in self.comment_files:
             raise FuseOSError(errno.EISDIR)
-        f, fname, size = open_content(path_objs[-2])
-        self.open_files[fname] = f, size
-        return f
+        fname, ext = get_content_fname(path_objs[-2])
+
+        if fname in self.open_files:
+            return self.open_files[fname][0]
+        else:
+            f, fname, size = open_content(path_objs[-2])
+            self.open_files[fname] = f, size
+            return f
         #full_path = self._full_path(path)
         #return os.open(full_path, flags)
     

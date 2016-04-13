@@ -94,33 +94,34 @@ def get_content_fname(obj):
 def open_content(obj):
     if type(obj) == type(""):
         return None
-    f, fname, size = None, None, None
+    f, size = None, None
+    fname = get_content_fname(obj)[0]
     if type(obj) == praw.objects.Comment:
-        fname = 'comment' + obj.id + '.txt'
+        #fname = 'comment' + obj.id + '.txt'
         f = open(fname, "w")
         f.write(obj.body)
         size = len(obj.body)
     # self post
     elif obj.is_self:
-        fname = "submission" + obj.id + '.txt'
+        #fname = "submission" + obj.id + '.txt'
         f = open(fname, "w")
         f.write(obj.title + '\n')
         f.write(obj.selftext)
-        size = len(obj.selftext)
+        size = len(obj.selftext) + len(obj.title)
         #extension = '.txt'
     else:
         req = requests.get(obj.url)
         try:
             assert(req.status_code == 200)
         except AssertionError:
-            fname = "submission" + obj.id + '.txt'
+            #fname = "submission" + obj.id + '.txt'
             f = open(fname, "w")
             error_str = "could not reach requested URL\n" + obj.url
             f.write(error_str)
             size = len(error_str)
             return f, fname, error_str
         if req.headers['content-type'] == 'application/pdf':
-            fname = "submission" + obj.id + '.pdf'
+            #fname = "submission" + obj.id + '.pdf'
             f = open(fname, "w")
             f.write(req.content)
             size = len(req.content)
@@ -136,7 +137,7 @@ def open_content(obj):
                         break
                 video = videos[0]
                 video.download("")
-                fname = "submission" + obj.id + '.mp4'
+                #fname = "submission" + obj.id + '.mp4'
                 f = open(fname, "w")
                 size = os.stat(fname)['st_size']
             elif obj.domain == 'imgur.com': # TODO: might run into problems if we try downloading a gif from imgur
@@ -156,7 +157,7 @@ def open_content(obj):
                 # figure out the url of the mp4 version of the video and download it
                 video_info = json.loads(req.content)
                 mp4_req = requests.get("http:" + video_info['files']['mp4']['url'])
-                fname = "submission" + obj.id + ".mp4"
+                #fname = "submission" + obj.id + ".mp4"
                 f = open(fname,"w")
                 f.write(mp4_req.content)
                 size = len(req.content)
@@ -170,13 +171,13 @@ def open_content(obj):
                 mp4_url = gfycat_info['gfyItem']['mp4Url']
                 mp4_req = requests.get(mp4_url)
                 assert(mp4_req.status_code == 200)
-                fname = "submission" + obj.id + ".mp4"
+                #fname = "submission" + obj.id + ".mp4"
                 f = open(fname, "w")
                 f.write(mp4_req.content)
                 size = len(mp4_req.content)
                 #extension = '.mp4'
             else:
-                fname = "submission" + obj.id + ".html"
+                #fname = "submission" + obj.id + ".html"
                 f = open(fname, "w")
                 f.write(req.content)
                 size = len(req.content)
