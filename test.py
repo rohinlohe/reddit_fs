@@ -71,9 +71,19 @@ def get_gfycat_id(url):
             break
     return id
 
+def get_content_size(obj):
+    if obj.domain == 'streamable.com':
+        # get the id of the video and make API request
+        id = obj.url.split("/")[-1]
+        req = requests.get("http://api.streamable.com/videos/" + id)
+        assert(req.status_code == 200)
+        # get the video data and extract the size from it
+        video_info = json.loads(req.content)
+        return video_info['files']['mp4']['size']
+
 def get_content_fname(obj):
-    if type(obj) == type(""):
-        return None
+    #if type(obj) == type(""):
+    #    return None
     mp4_domains = ['youtube.com', 'youtu.be', 'streamable.com', 'gfycat.com']
     if type(obj) == praw.objects.Comment or obj.is_self:
         return 'comment' + obj.id + '.txt', '.txt'
