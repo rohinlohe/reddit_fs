@@ -28,7 +28,7 @@ class RedditFS(Operations):
         self.content_extensions = ['.txt', '.html', '.gif', '.jpg', '.mp4', '.pdf', '.png']
         self.seen_submissions = {} # subreddit + sortkey -> [submissions]
         self.open_files = {} # fname -> file descriptor
-        self.file_sizes = {} # fname -> file size
+        self.file_attrs = {} # fname -> {'st_size':, 'st_atime':, 'st_ctime':, 'st_mtime'}
         self.content_fnames = {} # submission obj -> [fnames], extension
         self.max_content_files = 10 # maximum number of content files for one submission
         self.max_comments = 20 # maximum comment directories in a single directory
@@ -103,7 +103,7 @@ class RedditFS(Operations):
         # get the content number (1 less than in the display name for purposes
         # of array indexing)
         if 'content' in disp_fname:
-            content_num = int(disp_fname[len("content"):-4]) - 1
+            content_num = int(disp_fname[len("content"):disp_fname.find('.')]) - 1
         else:
             content_num = 0
         # get the storage file that the display name maps to
@@ -128,16 +128,17 @@ class RedditFS(Operations):
             # get content file names and extensions
             fname, content_num = self.get_content_fnames_wrap(path_objs[-2], path_objs[-1])
             # if we have the info about this file cached, don't make another request                        
-            if fname in self.file_sizes:
-                path_attrs['st_size'] = self.file_sizes[fname]
+            if fname in self.file_attrs:
+                attrs = self.file_attrs[fname]
+                #path_attrs['st_size'] = self.file_sizes[fname]
             else:
                 # look up the size and only download the full file if the size is small
-                f, size = open_content(path_objs[-2], fname, content_num, self.file_size_threshold)
+                f, attrs = open_content(path_objs[-2], fname, content_num, self.file_size_threshold)
                 if not f is None:
                     self.open_files[fname] = f
-                self.file_sizes[fname] = size
-                path_attrs['st_size'] = size
-
+                self.file_attrs[fname] = attrs
+                #path_attrs['st_size'] = size
+            path_attrs.update(attrs)
         else:
             path_attrs['st_mode'] = stat.S_IFDIR
             if type(path_objs[-1]) == praw.objects.Subreddit:
@@ -435,9 +436,9 @@ class RedditFS(Operations):
             return self.open_files[fname]
         # otherwise open the file for the first time and save the file descriptor
         else:
-            f, size = open_content(path_objs[-2], fname, content_num, self.max_file_size)
+            f, attrs = open_content(path_objs[-2], fname, content_num, self.max_file_size)
             self.open_files[fname] = f
-            self.file_sizes[fname] = size # in case we haven't saved the size already
+            self.file_attrs[fname] = attrs # in case we haven't saved the attrs already
             return f
         #full_path = self._full_path(path)
         #return os.open(full_path, flags)

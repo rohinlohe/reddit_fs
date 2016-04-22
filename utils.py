@@ -7,6 +7,7 @@ import json
 import os
 import urllib2
 import re
+from fuse import c_timespec
 
 CLIENT_ID = "5eb8e583972827f"
 
@@ -162,7 +163,7 @@ def handle_imgur(obj, fname, content_num, max_size):
     else:
         size = image.size
         if size < max_size:
-            image.download(name=fname[:-4], overwrite=True)
+            image.download(name=fname[:fname.find('.')], overwrite=True)
             f = open(fname, "rb")
     return f, size
 
@@ -201,7 +202,7 @@ def handle_gfycat(obj, fname, max_size):
 def handle_arbitrary_domain(obj, fname, max_size):
     f = None
     req = requests.get(obj.url)
-    content = req.content.encode('utf-8')
+    content = req.content#.encode('utf-8')
     size = len(content)
     if size < max_size:
         f = open(fname, "wb")
@@ -243,7 +244,17 @@ def open_content(obj, fname, content_num=0, max_size=float('inf')):
     if not f is None:
         f.close()       
         f = os.open(fname, os.O_RDONLY)
-    return f, size
+    attrs = {}
+    attrs['st_size'] = size
+    attrs['st_ctime'] = int(obj.created)
+    if obj.edited:
+        time_edited = obj.edited
+    else:
+        time_edited = obj.created
+    attrs['st_mtime'] = int(time_edited)
+    attrs['st_atime'] = int(obj.created)
+    attrs['st_birthtime'] = int(obj.created)
+    return f, attrs
 
 if __name__ == "__main__":
     r = praw.Reddit("testing /u/sweet_n_sour_curry", api_request_delay=1.0)
