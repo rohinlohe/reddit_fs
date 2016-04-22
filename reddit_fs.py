@@ -25,7 +25,7 @@ class RedditFS(Operations):
             subreddits = self.r.default_subreddits(limit=None)
         self.subreddits = list(subreddits)
         self.sort_keywords = ["hot", "new", "rising", "controversial", "top"]
-        self.content_extensions = ['.txt', '.html', '.gif', '.jpg', '.mp4', '.pdf']
+        self.content_extensions = ['.txt', '.html', '.gif', '.jpg', '.mp4', '.pdf', '.png']
         #self.comment_files = ["no comments", "newcomment"]
         #for ext in self.content_extensions:
         #    self.comment_files.append('content' + ext)
@@ -96,50 +96,50 @@ class RedditFS(Operations):
         fname = comment.body[:73] + " " + comment.id
         fname = fname.replace("/", "|")
         return fname.replace("\n", " ")
+
+    def get_content_fnames_wrap(self, obj, disp_fname):
+        if obj in self.content_fnames:
+            fnames, ext = self.content_fnames[obj]
+        else:
+            fnames, ext = get_content_fnames(obj, self.max_content_files)
+            self.content_fnames[obj] = fnames, ext
+        # get the content number (1 less than in the display name for purposes
+        # of array indexing)
+        if 'content' in disp_fname:
+            content_num = int(disp_fname[len("content"):-4]) - 1
+        else:
+            content_num = 0
+        # get the storage file that the display name maps to
+        fname = fnames[content_num]
+        return fname, content_num
         
     def getattr(self, path, fh=None):
         path_objs = self.path_to_objects(path)
         if path_objs is None:
             raise FuseOSError(errno.ENOENT)
 
-        print "PATH OBJ",path_objs
         path_attrs = {}
+        # root directory
         if len(path_objs) == 0:
             path_attrs['st_mode'] = stat.S_IFDIR
             path_attrs['st_size'] = len(self.subreddits)
             return path_attrs
         
+        # if we are asking about a content file, look up the size
         if path_objs[-1] in self.comment_files():
             path_attrs['st_mode'] = stat.S_IFREG
             # get content file names and extensions
-            if path_objs[-2] in self.content_fnames:
-                fnames, ext = self.content_fnames[path_objs[-2]]
-            else:
-                fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
-                self.content_fnames[path_objs[-2]] = fnames, ext
-            # get the content number (1 less for purposes of array indexing)
-            if 'content' in path_objs[-1]:
-                content_num = int(path_objs[-1][len("content"):-4]) - 1
-            else:
-                content_num = 0
-            fname = fnames[content_num]
-            #print "CHOSE FNAME TO BE", fname
-            
+            fname, content_num = self.get_content_fnames_wrap(path_objs[-2], path_objs[-1])
+            # if we have the info about this file cached, don't make another request                        
             if fname in self.open_files:
                 path_attrs['st_size'] = self.open_files[fname][1]
             else:
-                # we should look up the size and only download the full file
-                # if necessary
-                
-                files, fnames, sizes = open_content(path_objs[-2], content_num,
-                                                    self.file_size_threshold,
-                                                    self.max_content_files)
-                if len(files) > content_num:
-                    self.open_files[fnames[content_num]] = files[content_num], sizes[content_num]
-                path_attrs['st_size'] = sizes[content_num]
-                #return f
+                # look up the size and only download the full file if the size is small
+                f, size = open_content(path_objs[-2], fname, content_num, self.file_size_threshold)
+                if not f is None:
+                    self.open_files[fname] = f, size
+                path_attrs['st_size'] = size
 
-                #path_attrs['st_size'] = 20
         else:
             path_attrs['st_mode'] = stat.S_IFDIR
             #if path_obj[0] == "root":
@@ -334,39 +334,34 @@ class RedditFS(Operations):
 
         # sortkey directory
         elif path_objs[-1] in self.sort_keywords:
-            #path_pieces = path.split("/")
-            #path_pieces = filter(lambda x: len(x) > 0, path_pieces) 
             posts = self.get_posts(path_objs[0], path_objs[1])
             for post in posts:
                 yield self.post_to_fname(post)
 
         # post or comment directory
         elif path_type == praw.objects.Submission or path_type == praw.objects.Comment:
-            # need to update to add extension
+            # check if we've looked up this object before
             if path_objs[-1] in self.content_fnames:
                 content_files, ext = self.content_fnames[path_objs[-1]]
+            # if we haven't, look it up and save it
             else:
                 content_files, ext = get_content_fnames(path_objs[-1], self.max_content_files)
                 self.content_fnames[path_objs[-1]] = content_files, ext
             for i in range(1, len(content_files) + 1):
-                print "yielding", "content" + str(i) + '.' + ext
-                yield "content" + str(i) + '.' + ext
+                print "yielding", "content" + str(i) + ext
+                yield "content" + str(i) + ext
             
+            # get the comments (or replies to comments) and yield their directory names
             if path_type == praw.objects.Submission:
                 comments = self.get_n_comments(path_objs[-1].comments, self.max_comments)
-                # need to decide if we want to do some sort of "caching" or not
-                #if self.post_to_fname(path_obj[1]) in self.seen_submissions:
-                #    comments = self.seen_submissions[self.post_to_fname(path_obj[1])]
-                #else:
-                #    comments = self.get_n_comments(path_obj[1].comments, self.max_comments)
-                #    self.seen_submissions[self.post_to_fname(path_obj[1])] = comments
             else:
                 comments = self.get_n_comments(path_objs[-1].replies, self.max_comments)
             for comment in comments:
                 yield self.comment_to_fname(comment)
+            # if there are no comments/replies, yield a no comments file
             if len(comments) == 0:
                 yield "no comments"
-        elif path_obj[0] == "special file":
+        elif path_objs[-1] in self.comment_files():
             raise FuseOSError(errno.ENOTDIR)
 
     #def readlink(self, path):
@@ -401,7 +396,8 @@ class RedditFS(Operations):
                 'f_free': 20,
                 'f_files': 40,
                 'f_namemax': 80}
-    #dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree','f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag','f_frsize', 'f_namemax'))
+    #dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree','f_blocks', 'f_bsize', 
+    #'f_favail', 'f_ffree', 'f_files', 'f_flag','f_frsize', 'f_namemax'))
 
     #def unlink(self, path):
     #    pass
@@ -432,20 +428,24 @@ class RedditFS(Operations):
             raise FuseOSError(errno.ENOENT)
         if path_objs[-1] not in self.comment_files():
             raise FuseOSError(errno.EISDIR)
-        if path_objs[-2] in self.content_fnames:
-            fnames, ext = self.content_fnames[path_objs[-2]]
-        else:
-            fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
-            self.content_fnames[path_objs[-2]] = fnames, ext
-        content_num = int(path_objs[-1][len("content"):-4]) - 1
-        fname = fnames[content_num]
 
-        if fname in self.open_files:
+        fname, content_num = self.get_content_fnames_wrap(path_objs[-2], path_objs[-1])
+        #if path_objs[-2] in self.content_fnames:
+        #    fnames, ext = self.content_fnames[path_objs[-2]]
+        #else:
+        #    fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
+        #    self.content_fnames[path_objs[-2]] = fnames, ext
+        #content_num = int(path_objs[-1][len("content"):-4]) - 1
+        #fname = fnames[content_num]
+
+        if fname in self.open_files and not self.open_files[fname] is None:
+            print self.open_files[fname][0]
             return self.open_files[fname][0]
         else:
-            files, fnames, sizes = open_content(path_objs[-2], content_num, self.max_content_files)
-            self.open_files[fname] = files[content_num], sizes[content_num]
-            return files[content_num]
+            f, size = open_content(path_objs[-2], fname, content_num, self.max_file_size)
+            self.open_files[fname] = f, size
+            print f, content_num, fname
+            return f
         #full_path = self._full_path(path)
         #return os.open(full_path, flags)
     
@@ -484,15 +484,17 @@ class RedditFS(Operations):
             raise FuseOSError(errno.ENOENT)
         if path_objs[-1] not in self.comment_files():
             raise FuseOSError(errno.EISDIR)
-        content_num = int(path_objs[-1][len("content"):-4])
-        if path_objs[-2] in self.content_fnames:
-            fnames, ext = self.content_fnames[path_objs[-2]]
-        else:
-            fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
-            self.content_fnames[path_objs[-2]] = fnames, ext
-        fname = fnames[content_num]
-        if fname in self.open_files:
-            os.close(self.open_files[fname])
+
+        fname, content_num = self.get_content_fnames_wrap(path_objs[-2], path_objs[-1])
+        # content_num = int(path_objs[-1][len("content"):-4])
+        # if path_objs[-2] in self.content_fnames:
+        #     fnames, ext = self.content_fnames[path_objs[-2]]
+        # else:
+        #     fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
+        #     self.content_fnames[path_objs[-2]] = fnames, ext
+        # fname = fnames[content_num]
+        if fname in self.open_files and not self.open_files[fname] is None:
+            os.close(self.open_files[fname][0])
             os.unlink(fname)
             del self.open_files[fname]
 
