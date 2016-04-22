@@ -26,24 +26,21 @@ class RedditFS(Operations):
         self.subreddits = list(subreddits)
         self.sort_keywords = ["hot", "new", "rising", "controversial", "top"]
         self.content_extensions = ['.txt', '.html', '.gif', '.jpg', '.mp4', '.pdf', '.png']
-        #self.comment_files = ["no comments", "newcomment"]
-        #for ext in self.content_extensions:
-        #    self.comment_files.append('content' + ext)
-        #self.post_files = ["no comments", "content", "newpost"]
-        self.seen_submissions = {}
-        self.open_files = {}
-        self.content_fnames = {}
-        self.max_content_files = 10
+        self.seen_submissions = {} # subreddit + sortkey -> [submissions]
+        self.open_files = {} # fname -> file descriptor
+        self.file_sizes = {} # fname -> file size
+        self.content_fnames = {} # submission obj -> [fnames], extension
+        self.max_content_files = 10 # maximum number of content files for one submission
         self.max_comments = 20 # maximum comment directories in a single directory
         self.file_size_threshold = 1000 # when checking size, also save file if below this size
-        self.max_file_size = float('inf') # might wanna make this smaller (bc YouTube)
+        self.max_file_size = float('inf') # might wanna make this smaller (YouTube)
         print "ready"
 
     def comment_files(self):
         # python generator to give us all the possible content file names and
         # the other files we might find in a comment directory
         yield "no comments"
-        yield "newcomment"
+        yield "newcomment.txt"
         base = "content"
         for i in range(1, self.max_content_files):
             for ext in self.content_extensions:
@@ -131,19 +128,18 @@ class RedditFS(Operations):
             # get content file names and extensions
             fname, content_num = self.get_content_fnames_wrap(path_objs[-2], path_objs[-1])
             # if we have the info about this file cached, don't make another request                        
-            if fname in self.open_files:
-                path_attrs['st_size'] = self.open_files[fname][1]
+            if fname in self.file_sizes:
+                path_attrs['st_size'] = self.file_sizes[fname]
             else:
                 # look up the size and only download the full file if the size is small
                 f, size = open_content(path_objs[-2], fname, content_num, self.file_size_threshold)
                 if not f is None:
-                    self.open_files[fname] = f, size
+                    self.open_files[fname] = f
+                self.file_sizes[fname] = size
                 path_attrs['st_size'] = size
 
         else:
             path_attrs['st_mode'] = stat.S_IFDIR
-            #if path_obj[0] == "root":
-            #    path_attrs['st_size'] = len(self.subreddits)
             if type(path_objs[-1]) == praw.objects.Subreddit:
                 path_attrs['st_size'] = 5
             elif path_objs[-1] in self.sort_keywords:
@@ -161,7 +157,11 @@ class RedditFS(Operations):
         posts to retrieve and retrieves the n posts from the given subreddit
         under the given sort key.
         """
-        if sort_key == "hot":
+        submissions_name = subreddit.display_name + sort_key
+        print "SUBMISSIONS_NAME IS", submissions_name
+        if submissions_name in self.seen_submissions:
+            return self.seen_submissions[submissions_name]
+        elif sort_key == "hot":
             posts = subreddit.get_hot(limit=num_posts)
         elif sort_key == "new":
             posts = subreddit.get_new(limit=num_posts)
@@ -173,7 +173,8 @@ class RedditFS(Operations):
             posts = subreddit.get_top(limit=num_posts)
         else:
             raise FuseOSError(errno.ENOENT)
-        return posts
+        self.seen_submissions[submissions_name] = list(posts)
+        return self.seen_submissions[submissions_name]
 
     def get_n_comments(self, comments, max_comments):
         """
@@ -183,15 +184,14 @@ class RedditFS(Operations):
         all_comments = []
         more_comments = []
         for comment in comments:
-            if type(comment) == praw.objects.MoreComments and comment.count > 0:
-                more_comments.append(comment)
-                #all_comments.extend(self.get_n_comments(comment.comments(),
-                            #                            max_comments - len(all_comments)))
-            else:
-                all_comments.append(comment)
             # don't give back too many comments!
             if (len(all_comments) >= max_comments):
-                break
+                return all_comments
+            # save the MoreComments objects for the end since they take awhile
+            if type(comment) == praw.objects.MoreComments and comment.count > 0:
+                more_comments.append(comment)
+            else:
+                all_comments.append(comment)
         for more_comment in more_comments:
             all_comments.extend(self.get_n_comments(more_comment.comments(),
                                 max_comments - len(all_comments)))
@@ -430,21 +430,14 @@ class RedditFS(Operations):
             raise FuseOSError(errno.EISDIR)
 
         fname, content_num = self.get_content_fnames_wrap(path_objs[-2], path_objs[-1])
-        #if path_objs[-2] in self.content_fnames:
-        #    fnames, ext = self.content_fnames[path_objs[-2]]
-        #else:
-        #    fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
-        #    self.content_fnames[path_objs[-2]] = fnames, ext
-        #content_num = int(path_objs[-1][len("content"):-4]) - 1
-        #fname = fnames[content_num]
-
-        if fname in self.open_files and not self.open_files[fname] is None:
-            print self.open_files[fname][0]
-            return self.open_files[fname][0]
+        # if we've opened this file before, give back the file descriptor we already have
+        if fname in self.open_files:
+            return self.open_files[fname]
+        # otherwise open the file for the first time and save the file descriptor
         else:
             f, size = open_content(path_objs[-2], fname, content_num, self.max_file_size)
-            self.open_files[fname] = f, size
-            print f, content_num, fname
+            self.open_files[fname] = f
+            self.file_sizes[fname] = size # in case we haven't saved the size already
             return f
         #full_path = self._full_path(path)
         #return os.open(full_path, flags)
@@ -486,22 +479,12 @@ class RedditFS(Operations):
             raise FuseOSError(errno.EISDIR)
 
         fname, content_num = self.get_content_fnames_wrap(path_objs[-2], path_objs[-1])
-        # content_num = int(path_objs[-1][len("content"):-4])
-        # if path_objs[-2] in self.content_fnames:
-        #     fnames, ext = self.content_fnames[path_objs[-2]]
-        # else:
-        #     fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
-        #     self.content_fnames[path_objs[-2]] = fnames, ext
-        # fname = fnames[content_num]
-        if fname in self.open_files and not self.open_files[fname] is None:
-            os.close(self.open_files[fname][0])
+        if fname in self.open_files:
+            os.close(self.open_files[fname])
             os.unlink(fname)
             del self.open_files[fname]
 
-        #self.open_files[fname] = f
         return None
-        #pass
-        #return os.close(fh)
     
     #def fsync(self, path, fdatasync, fh):
     #    pass

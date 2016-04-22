@@ -31,8 +31,11 @@ def handle_imgur_names(obj, base_fname, max_num_files):
         # add a name for each image in the album, but no more than max_num_files
         for i in range(min(len(album.images), max_num_files)):
             ext = str(album.images[i].type.split('/')[-1])
-            if ext == 'jpeg':
+            ext = '.' + ext
+            if ext == '.jpeg':
                 ext = '.jpg'
+            elif ext == '.gif':
+                ext = '.mp4'
             fnames.append(base_fname + str(i + 1) + ext)
     # otherwise, we have a single image
     else:
@@ -45,14 +48,15 @@ def handle_imgur_names(obj, base_fname, max_num_files):
         img = im.get_image(id)
         # img.type will be like 'image/jpg', we just want the jpg part
         ext = str(img.type.split('/')[-1])
-        if ext == 'jpeg':
+        ext = '.' + ext
+        if ext == '.jpeg':
             ext = '.jpg'
+        elif ext == '.gif':
+            ext = '.mp4'
         fnames.append(base_fname + ext)
     return fnames, ext    
 
 def get_content_fnames(obj, max_num_files):
-    #if type(obj) == type(""):
-    #    return None
     mp4_domains = ['youtube.com', 'youtu.be', 'streamable.com', 'gfycat.com']
     if type(obj) == praw.objects.Comment: 
         return ['comment' + obj.id + '.txt'], '.txt'
@@ -77,38 +81,42 @@ def get_content_fnames(obj, max_num_files):
 
 def handle_bad_url(url, fname):
     # handle the case where we have a bad url
-    #assert(len(fname) == 1)
-    f = open(fname, "w")
-    error_str = "could not reach requested URL\n" + str(url)
+    f = open(fname, "wb")
+    error_str = ("could not reach requested URL\n" + str(url)).encode('utf-8')
     f.write(error_str)
     size = len(error_str)
     return f, size
 
 def handle_comment(obj, fname, max_size):
-    size = len(obj.body)
+    body = obj.body.encode('utf8')
+    size = len(body)
     f = None
     if size < max_size:
-        f = open(fname, "w")
-        f.write(obj.body)
+        f = open(fname, "wb")
+        f.write(body)
     return f, size
 
 def handle_self_post(obj, fname, max_size):
     f = None
-    size = len(obj.selftext) + len(obj.title) + 1
+    title = obj.title.encode('utf-8')
+    selftext = obj.selftext.encode('utf-8')
+    size = len(title) + len(selftext) + 2 # plus 2 for 2 newlines
     if size < max_size:
-        f = open(fname, "w")
-        f.write(obj.title + '\n')
-        f.write(obj.selftext)
+        f = open(fname, "wb")
+        f.write(title + '\n\n')
+        f.write(selftext)
     return f, size
 
 
 def handle_pdf(obj, fname, max_size):
     req = requests.get(obj.url)
     f = None
-    size = req.headers['content-length']
+    content = req.content.encode('utf-8')
+    #size = req.headers['content-length']
+    size = len(content)
     if size > max_size:
         f = open(fname, "wb")
-        f.write(req.content)
+        f.write(content)
     return f, size
         
 def handle_youtube(obj, fname, max_size):
@@ -130,11 +138,7 @@ def handle_youtube(obj, fname, max_size):
     return f, size
 
 def handle_imgur(obj, fname, content_num, max_size):
-    files, sizes = [], []
-    # TODO: might run into problems if we try downloading a gif from imgur
-    # TODO: imgur urls can end with .gifv (or other extension) in which case we
-    # can download them directly
-    fname = fname
+    f = None
     im = pyimgur.Imgur(CLIENT_ID)
     url = obj.url
     url_pieces = url.split("/")
@@ -142,8 +146,6 @@ def handle_imgur(obj, fname, content_num, max_size):
     if url_pieces[-2] == 'a':
         album = im.get_album(url_pieces[-1])
         image = album.images[content_num]
-        #for img in album.images:
-        #    sizes.append(img.size)
     else:
         period_loc = url_pieces[-1].find('.')
         if period_loc < 0:
@@ -151,10 +153,17 @@ def handle_imgur(obj, fname, content_num, max_size):
         else:
             id = url_pieces[-1][:period_loc]
         image = im.get_image(id)
-    size = image.size
-
-    image.download(name=fname[:-4], overwrite=True)
-    f = open(fname, "r")
+    if image.is_animated:
+        size = int(image.mp4_size)
+        if size < max_size:
+            req = requests.get(image.mp4)
+            f = open(fname, 'wb')
+            f.write(req.content)
+    else:
+        size = image.size
+        if size < max_size:
+            image.download(name=fname[:-4], overwrite=True)
+            f = open(fname, "rb")
     return f, size
 
 def handle_streamable(obj, fname, max_size):
@@ -168,7 +177,7 @@ def handle_streamable(obj, fname, max_size):
     size = [video_info['files']['mp4']['size']]
     if size < max_size:
         mp4_req = requests.get("http:" + video_info['files']['mp4']['url'])
-        f = open(fname,"w")
+        f = open(fname,"wb")
         f.write(mp4_req.content)
     return f, size
 
@@ -185,22 +194,21 @@ def handle_gfycat(obj, fname, max_size):
         mp4_url = gfycat_info['gfyItem']['mp4Url']
         mp4_req = requests.get(mp4_url)
         assert(mp4_req.status_code == 200)
-        f = open(fname, "w")
+        f = open(fname, "wb")
         f.write(mp4_req.content)
     return f, size
 
 def handle_arbitrary_domain(obj, fname, max_size):
     f = None
     req = requests.get(obj.url)
-    size = len(req.content)
+    content = req.content.encode('utf-8')
+    size = len(content)
     if size < max_size:
-        f = open(fname, "w")
-        f.write(req.content)
+        f = open(fname, "wb")
+        f.write(content)
     return f, size
 
 def open_content(obj, fname, content_num=0, max_size=float('inf')):
-    #if type(obj) == type(""):
-    #    return None
     f, size = None, None
     ext = fname[fname.find('.'):]
     # we have a comment
@@ -210,12 +218,7 @@ def open_content(obj, fname, content_num=0, max_size=float('inf')):
     elif obj.is_self:
         f, size = handle_self_post(obj, fname, max_size)
     else:
-        # if our extension to the filename is .txt, we must have gotten a status
-        # code other than 200 in our get_content_fname() function
-        #if ext == '.txt':
-        #    f, size = handle_bad_url(obj.url, fname)
-        # otherwise check if we are in one of our supported domains
-        if ext == '.pdf':#req.headers['content-type'] == 'application/pdf':
+        if ext == '.pdf':
             f, size = handle_pdf(obj, fname, max_size)
         elif obj.domain == 'youtube.com' or obj.domain == 'youtu.be':
             f, size = handle_youtube(obj, fname, max_size)
@@ -226,13 +229,15 @@ def open_content(obj, fname, content_num=0, max_size=float('inf')):
         elif obj.domain == 'gfycat.com':
             f, size = handle_gfycat(obj, fname, max_size)
         else:
+            # if we aren't in one of our supported domains, check if we can access
+            # the page and either give the html or a text file explaining that
+            # we can't access the page
             try:
                 req = urllib2.urlopen(obj.url)
                 f, size = handle_arbitrary_domain(obj, fname, max_size)
             except urllib2.HTTPError:
                 f, size = handle_bad_url(obj.url, fname)
 
-    #if files != []:
     # close the python file objects and then reopen with os.open to give back
     # file descriptors
     if not f is None:
@@ -242,27 +247,29 @@ def open_content(obj, fname, content_num=0, max_size=float('inf')):
 
 if __name__ == "__main__":
     r = praw.Reddit("testing /u/sweet_n_sour_curry", api_request_delay=1.0)
-    #self_sub = r.get_submission(submission_id="4e8q3w") # 4e8z8t
+    #self_sub = r.get_submission(submission_id="4fwxht")
     #pdf_sub = r.get_submission(submission_id="3ui1d4")
     #youtube_sub = r.get_submission(submission_id="4e5pmj")
     #streamable_sub = r.get_submission(submission_id="4e8gw4")
-    gfycat_sub = r.get_submission(submission_id="4egtz7")
+    #gfycat_sub = r.get_submission(submission_id="4egtz7")
     #otherlink_sub = r.get_submission(submission_id="4eg3df")
     #bad_url_sub = r.get_submission(submission_id="4fumb2")
     #imgur_sub = r.get_submission(submission_id="4ei4da")  #4eift7 gifv
-    imgur_sub = r.get_submission(submission_id="4frmex")
+    #imgur_sub = r.get_submission(submission_id="4frmex")
+    imgur_sub_gif = r.get_submission(submission_id = "4fus57")
     #soundcloud_sub = r.get_submission(submission_id="4eaxqt")
     
     #open_content(self_sub, get_content_fnames(self_sub, 1)[0][0])
     #open_content(pdf_sub, get_content_fnames(pdf_sub, 1)[0][0])
     #open_content(youtube_sub, get_content_fnames(youtube_sub, 1)[0][0])
     #open_content(streamable_sub, get_content_fnames(streamable_sub, 1)[0][0])
-    open_content(gfycat_sub, get_content_fnames(gfycat_sub, 1)[0][0])
+    #open_content(gfycat_sub, get_content_fnames(gfycat_sub, 1)[0][0])
     #open_content(otherlink_sub, get_content_fnames(otherlink_sub, 1)[0][0])
     #open_content(bad_url_sub, get_content_fnames(bad_url_sub, 1)[0][0])
+    open_content(imgur_sub_gif, get_content_fnames(imgur_sub_gif, 1)[0][0])
     
-    imgur_names, ext = get_content_fnames(imgur_sub, 5)
-    open_content(imgur_sub, imgur_names[0], 0)
+    #imgur_names, ext = get_content_fnames(imgur_sub, 5)
+    #open_content(imgur_sub, imgur_names[0], 0)
     #open_content(imgur_sub, imgur_names[1], 1)
     #open_content(imgur_sub, imgur_names[2], 2)
     #open_content(imgur_sub, imgur_names[3], 3)
