@@ -32,12 +32,20 @@ class RedditFS(Operations):
         #self.post_files = ["no comments", "content", "newpost"]
         self.seen_submissions = {}
         self.open_files = {}
-        self.max_content_files = 100
+        self.content_fnames = {}
+        self.max_content_files = 10
+        self.max_comments = 20 # maximum comment directories in a single directory
+        self.file_size_threshold = 1000 # when checking size, also save file if below this size
+        self.max_file_size = float('inf') # might wanna make this smaller (bc YouTube)
         print "ready"
 
     def comment_files(self):
+        # python generator to give us all the possible content file names and
+        # the other files we might find in a comment directory
+        yield "no comments"
+        yield "newcomment"
         base = "content"
-        for i in range(self.max_content_files):
+        for i in range(1, self.max_content_files):
             for ext in self.content_extensions:
                 yield base + str(i) + ext
 
@@ -102,18 +110,33 @@ class RedditFS(Operations):
             return path_attrs
         
         if path_objs[-1] in self.comment_files():
-        #if path_obj[0] == "special file":
             path_attrs['st_mode'] = stat.S_IFREG
-            fname, ext = get_content_fname(path_objs[-2])
+            # get content file names and extensions
+            if path_objs[-2] in self.content_fnames:
+                fnames, ext = self.content_fnames[path_objs[-2]]
+            else:
+                fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
+                self.content_fnames[path_objs[-2]] = fnames, ext
+            # get the content number (1 less for purposes of array indexing)
+            if 'content' in path_objs[-1]:
+                content_num = int(path_objs[-1][len("content"):-4]) - 1
+            else:
+                content_num = 0
+            fname = fnames[content_num]
+            #print "CHOSE FNAME TO BE", fname
+            
             if fname in self.open_files:
                 path_attrs['st_size'] = self.open_files[fname][1]
             else:
                 # we should look up the size and only download the full file
                 # if necessary
                 
-                f, fname, size = open_content(path_objs[-2])
-                self.open_files[fname] = f, size
-                path_attrs['st_size'] = size
+                files, fnames, sizes = open_content(path_objs[-2], content_num,
+                                                    self.file_size_threshold,
+                                                    self.max_content_files)
+                if len(files) > content_num:
+                    self.open_files[fnames[content_num]] = files[content_num], sizes[content_num]
+                path_attrs['st_size'] = sizes[content_num]
                 #return f
 
                 #path_attrs['st_size'] = 20
@@ -152,17 +175,26 @@ class RedditFS(Operations):
             raise FuseOSError(errno.ENOENT)
         return posts
 
-    def get_all_comments(self, comments):
+    def get_n_comments(self, comments, max_comments):
         """
         Takes in a list of comments and gives back the list, replacing any
         MoreComments objects with their actual comments.
         """
         all_comments = []
+        more_comments = []
         for comment in comments:
             if type(comment) == praw.objects.MoreComments and comment.count > 0:
-                all_comments.extend(self.get_all_comments(comment.comments()))
+                more_comments.append(comment)
+                #all_comments.extend(self.get_n_comments(comment.comments(),
+                            #                            max_comments - len(all_comments)))
             else:
                 all_comments.append(comment)
+            # don't give back too many comments!
+            if (len(all_comments) >= max_comments):
+                break
+        for more_comment in more_comments:
+            all_comments.extend(self.get_n_comments(more_comment.comments(),
+                                max_comments - len(all_comments)))
         return all_comments 
 
     def find_comment(self, comments, comment_id):
@@ -173,6 +205,8 @@ class RedditFS(Operations):
         reducing the expected number of praw calls to be made.
         """
         print "trying to find comment", comment_id
+        if not comment_id.isalnum():
+            return None
         more_comments = []
         for comment in comments:
             if type(comment) == praw.objects.MoreComments and comment.count > 0:
@@ -180,21 +214,11 @@ class RedditFS(Operations):
             elif comment.id == comment_id:
                 return comment
         for more_comment in more_comments:
-            result = find_comment(more_comment.comments(), comment_id)
+            result = self.find_comment(more_comment.comments(), comment_id)
             if not result is None:
                 return result
         return None
 
-
-    def get_html(self, url):
-        # read the url
-        req = urllib2.Request(url);
-        response = urllib2.urlopen(req)
-        htmltext = response.read()
-        # extract the html code 
-        unicode_content = htmltext.decode('utf-8')
-        final = html2text.html2text(unicode_content)
-        return final
                                 
     def path_to_objects(self, path):
         """
@@ -216,10 +240,10 @@ class RedditFS(Operations):
                 break
         if subreddit_obj is None:
             return None
-        #if not subreddit_obj is None:
+
         path_objs.append(subreddit_obj)
         if len(path_pieces) == 1:
-            return path_objs#"subreddit", subreddit_obj
+            return path_objs
 
 
         # check if the sort key part of the path exists
@@ -230,10 +254,10 @@ class RedditFS(Operations):
             return None
         path_objs.append(sort_key)
         if len(path_pieces) == 2:
-            return path_objs#"sort key", sort_key
+            return path_objs
         
         if len(path_pieces) == 3 and path_pieces[2] == "newpost":
-            return path_obj.append("newpost")#"special file", None
+            return path_obj.append("newpost")
 
         # check if the post part of the path exists
         post_obj = None
@@ -246,13 +270,13 @@ class RedditFS(Operations):
             return None
         path_objs.append(post_obj)
         if len(path_pieces) == 3:
-            return path_objs#"post", post_obj
+            return path_objs
         
 
         # check if our path has a special comment file
         if len(path_pieces) == 4 and path_pieces[3] in self.comment_files():
             path_objs.append(path_pieces[3])
-            return path_objs #"special file", None
+            return path_objs
         
         # check if the first comment part of the path exists
         comment_id = self.comment_fname_to_id(path_pieces[3])
@@ -261,7 +285,7 @@ class RedditFS(Operations):
             return None
         path_objs.append(comment_obj)
         if len(path_pieces) == 4:
-            return path_objs#"comment", comment_obj
+            return path_objs
 
 
         # check if the rest of the comment parts of the path exist
@@ -270,7 +294,7 @@ class RedditFS(Operations):
             print path_pieces[i]
             if len(path_pieces) == i + 1 and path_pieces[i] in self.comment_files():
                 path_objs.append(path_pieces[i])
-                return path_objs#"special file", None
+                return path_objs
             comment_id = self.comment_fname_to_id(path_pieces[i])
             lower_comment_obj = self.find_comment(comment_obj.replies, comment_id)
             if lower_comment_obj is None:
@@ -280,7 +304,7 @@ class RedditFS(Operations):
             lower_comment_obj = None
 
         if not comment_obj is None:
-            return path_objs#"comment", comment_obj
+            return path_objs
 
         return None
             
@@ -295,41 +319,49 @@ class RedditFS(Operations):
         path_objs = self.path_to_objects(path)
         if path_objs is None:
             raise FuseOSError(errno.ENOENT)
-        
-        #if path_obj[0] == "root":
+
+        # root directory
         if len(path_objs) == 0:
             for s in self.subreddits:
                 yield s.display_name
             return
         path_type = type(path_objs[-1])
-        #elif path_obj[0] == "subreddit":
+
+        # subreddit directory
         if len(path_objs) == 1:
             [(yield key) for key in self.sort_keywords]
             yield "newpost"
 
-        #elif path_obj[0] == "sort key":
+        # sortkey directory
         elif path_objs[-1] in self.sort_keywords:
-            path_pieces = path.split("/")
-            path_pieces = filter(lambda x: len(x) > 0, path_pieces) 
-            posts = self.get_posts(path_objs[0], path_objs[1])#self.r.get_subreddit(path_pieces[0]), path_obj[1])
+            #path_pieces = path.split("/")
+            #path_pieces = filter(lambda x: len(x) > 0, path_pieces) 
+            posts = self.get_posts(path_objs[0], path_objs[1])
             for post in posts:
                 yield self.post_to_fname(post)
+
+        # post or comment directory
         elif path_type == praw.objects.Submission or path_type == praw.objects.Comment:
-        #elif path_obj[0] == "post" or path_obj[0] == "comment":
             # need to update to add extension
-            content_files = get_content_fnames(path_objs[-1])
-            #yield "content" + get_content_fname(path_objs[-1])[1]
+            if path_objs[-1] in self.content_fnames:
+                content_files, ext = self.content_fnames[path_objs[-1]]
+            else:
+                content_files, ext = get_content_fnames(path_objs[-1], self.max_content_files)
+                self.content_fnames[path_objs[-1]] = content_files, ext
+            for i in range(1, len(content_files) + 1):
+                print "yielding", "content" + str(i) + '.' + ext
+                yield "content" + str(i) + '.' + ext
             
             if path_type == praw.objects.Submission:
-                comments = self.get_all_comments(path_objs[-1].comments)#[1].comments)
+                comments = self.get_n_comments(path_objs[-1].comments, self.max_comments)
                 # need to decide if we want to do some sort of "caching" or not
                 #if self.post_to_fname(path_obj[1]) in self.seen_submissions:
                 #    comments = self.seen_submissions[self.post_to_fname(path_obj[1])]
                 #else:
-                #    comments = self.get_all_comments(path_obj[1].comments)
+                #    comments = self.get_n_comments(path_obj[1].comments, self.max_comments)
                 #    self.seen_submissions[self.post_to_fname(path_obj[1])] = comments
             else:
-                comments = self.get_all_comments(path_objs[-1].replies)#path_obj[1].replies)
+                comments = self.get_n_comments(path_objs[-1].replies, self.max_comments)
             for comment in comments:
                 yield self.comment_to_fname(comment)
             if len(comments) == 0:
@@ -400,14 +432,20 @@ class RedditFS(Operations):
             raise FuseOSError(errno.ENOENT)
         if path_objs[-1] not in self.comment_files():
             raise FuseOSError(errno.EISDIR)
-        fname, ext = get_content_fname(path_objs[-2])
+        if path_objs[-2] in self.content_fnames:
+            fnames, ext = self.content_fnames[path_objs[-2]]
+        else:
+            fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
+            self.content_fnames[path_objs[-2]] = fnames, ext
+        content_num = int(path_objs[-1][len("content"):-4]) - 1
+        fname = fnames[content_num]
 
         if fname in self.open_files:
             return self.open_files[fname][0]
         else:
-            f, fname, size = open_content(path_objs[-2])
-            self.open_files[fname] = f, size
-            return f
+            files, fnames, sizes = open_content(path_objs[-2], content_num, self.max_content_files)
+            self.open_files[fname] = files[content_num], sizes[content_num]
+            return files[content_num]
         #full_path = self._full_path(path)
         #return os.open(full_path, flags)
     
@@ -424,12 +462,6 @@ class RedditFS(Operations):
             raise FuseOSError(errno.EISDIR)
         os.lseek(fh, offset, os.SEEK_SET)
         return os.read(fh, length)
-        #f, fname = open_content(path)
-        #fname, ext = get_content_fname(path_objs[-1])
-
-        #pass
-        #os.lseek(fh, offset, os.SEEK_SET)
-        #return os.read(fh, length)
     
     def write(self, path, buf, offset, fh):
         pass
@@ -452,8 +484,13 @@ class RedditFS(Operations):
             raise FuseOSError(errno.ENOENT)
         if path_objs[-1] not in self.comment_files():
             raise FuseOSError(errno.EISDIR)
-        #f, fname = open_content(path)
-        fname, ext = get_content_fname(path_objs[-2])
+        content_num = int(path_objs[-1][len("content"):-4])
+        if path_objs[-2] in self.content_fnames:
+            fnames, ext = self.content_fnames[path_objs[-2]]
+        else:
+            fnames, ext = get_content_fnames(path_objs[-2], self.max_content_files)
+            self.content_fnames[path_objs[-2]] = fnames, ext
+        fname = fnames[content_num]
         if fname in self.open_files:
             os.close(self.open_files[fname])
             os.unlink(fname)
