@@ -45,24 +45,11 @@ class RedditFS(Operations):
         for i in range(1, self.max_content_files):
             for ext in self.content_extensions:
                 yield base + str(i) + ext
-
-    # Filesystem methods
-    # ==================
             
     def access(self, path, mode):
         if self.path_to_objects(path) is None:
             raise FuseOSError(errno.ENOENT)
         
-    #def chmod(self, path, mode):
-    #    pass
-        #full_path = self._full_path(path)
-        #return os.chmod(full_path, mode)
-        
-    #def chown(self, path, uid, gid):
-    #    pass
-        #full_path = self._full_path(path)
-        #return os.chown(full_path, uid, gid)
-
     def post_fname_to_id(self, fname):
         """
         Extracts the post id portion from a directory name.
@@ -80,7 +67,11 @@ class RedditFS(Operations):
         Converts a post to a string containing some of the title of the post
         and the id of the post (post ids are 6 alpha-numeric characters).
         """
-        fname = post.title[:74] + " " + post.id
+        title = post.title
+        if len(post.title) > 74:
+            truncated_title = post.title[:74]
+            title = post.title[:truncated_title.rfind(' ')]
+        fname =  title + " " + post.id
         fname = fname.replace("/", "|")
         return fname.replace("\n", " ")
 
@@ -90,7 +81,11 @@ class RedditFS(Operations):
         comment and the id of the comment (comment ids are 7 alpha-numeric
         characters).
         """
-        fname = comment.body[:73] + " " + comment.id
+        body = comment.body
+        if len(comment.body) > 74:
+            truncated_body = comment.body[:74]
+            body = comment.body[:truncated_body.rfind(' ')]
+        fname = body + " " + comment.id
         fname = fname.replace("/", "|")
         return fname.replace("\n", " ")
 
@@ -360,32 +355,8 @@ class RedditFS(Operations):
                 yield "no comments"
         elif path_objs[-1] in self.comment_files():
             raise FuseOSError(errno.ENOTDIR)
-
-    #def readlink(self, path):
-    #    pass
-        #pathname = os.readlink(self._full_path(path))
-        #if pathname.startswith("/"):
-            # Path name is absolute, sanitize it.
-        #    return os.path.relpath(pathname, self.root)
-        #else:
-        #    return pathname
-
-    #def mknod(self, path, mode, dev):
-    #    pass
-        #return os.mknod(self._full_path(path), mode, dev)
-
-    #def rmdir(self, path):
-    #    pass
-        #full_path = self._full_path(path)
-        #return os.rmdir(full_path)
-
-    #def mkdir(self, path, mode):
-    #    pass
-        #return os.mkdir(self._full_path(path), mode)
     
     def statfs(self, path):
-        #full_path = self._full_path(path)
-        #stv = os.statvfs(full_path)
         return {'f_bavail': 20,
                 'f_bfree': 20,
                 'f_blocks': 40,
@@ -393,32 +364,7 @@ class RedditFS(Operations):
                 'f_free': 20,
                 'f_files': 40,
                 'f_namemax': 80}
-    #dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree','f_blocks', 'f_bsize', 
-    #'f_favail', 'f_ffree', 'f_files', 'f_flag','f_frsize', 'f_namemax'))
 
-    #def unlink(self, path):
-    #    pass
-        #return os.unlink(self._full_path(path))
-    
-    #def symlink(self, name, target):
-    #    pass
-        #return os.symlink(name, self._full_path(target))
-    
-    #def rename(self, old, new):
-    #    pass
-        #return os.rename(self._full_path(old), self._full_path(new))
-    
-    #def link(self, target, name):
-    #    pass
-        #return os.link(self._full_path(target), self._full_path(name))
-    
-    #def utimens(self, path, times=None):
-    #    pass
-        #return os.utime(self._full_path(path), times)
-    
-    # File methods
-    # ============
-    
     def open(self, path, flags):
         path_objs = self.path_to_objects(path)
         if path_objs is None:
@@ -436,13 +382,6 @@ class RedditFS(Operations):
             self.open_files[fname] = f
             self.file_attrs[fname] = attrs # in case we haven't saved the attrs already
             return f
-        #full_path = self._full_path(path)
-        #return os.open(full_path, flags)
-    
-    #def create(self, path, mode, fi=None):
-    #    pass
-        #full_path = self._full_path(path)
-        #return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
     
     def read(self, path, length, offset, fh):
         path_objs = self.path_to_objects(path)
@@ -458,16 +397,6 @@ class RedditFS(Operations):
         #os.lseek(fh, offset, os.SEEK_SET)
         #return os.write(fh, buf)
     
-    #def truncate(self, path, length, fh=None):
-    #    pass
-        #full_path = self._full_path(path)
-        #with open(full_path, 'r+') as f:
-        #    f.truncate(length)
-            
-    #def flush(self, path, fh):
-    #    pass
-        #return os.fsync(fh)
-
     def release(self, path, fh):
         path_objs = self.path_to_objects(path)
         if path_objs is None:
@@ -482,11 +411,12 @@ class RedditFS(Operations):
             del self.open_files[fname]
 
         return None
-    
-    #def fsync(self, path, fdatasync, fh):
-    #    pass
-        #return self.flush(path, fh)
-    
+
+    def destroy(self, private_data):
+        # remove all the open files
+        for fname, f in self.open_files.iteritems():
+            os.close(f)
+            os.unlink(fname)    
         
 if __name__ == '__main__':
     mountpoint = sys.argv[1]
