@@ -7,7 +7,8 @@ import json
 import os
 import urllib2
 import re
-from fuse import c_timespec
+import calendar
+from datetime import datetime, timedelta
 
 CLIENT_ID = "5eb8e583972827f"
 
@@ -112,10 +113,10 @@ def handle_self_post(obj, fname, max_size):
 def handle_pdf(obj, fname, max_size):
     req = requests.get(obj.url)
     f = None
-    content = req.content.encode('utf-8')
+    content = req.content
     #size = req.headers['content-length']
     size = len(content)
-    if size > max_size:
+    if size < max_size:
         f = open(fname, "wb")
         f.write(content)
     return f, size
@@ -175,7 +176,7 @@ def handle_streamable(obj, fname, max_size):
     assert(req.status_code == 200)
     # figure out the url of the mp4 version of the video and download it
     video_info = json.loads(req.content)
-    size = [video_info['files']['mp4']['size']]
+    size = video_info['files']['mp4']['size']
     if size < max_size:
         mp4_req = requests.get("http:" + video_info['files']['mp4']['url'])
         f = open(fname,"wb")
@@ -208,6 +209,16 @@ def handle_arbitrary_domain(obj, fname, max_size):
         f = open(fname, "wb")
         f.write(content)
     return f, size
+
+#http://stackoverflow.com/questions/4563272/how-to-convert-a-python-utc-datetime
+#-to-a-local-datetime-using-only-python-stand (with small modifications)
+def utc_to_local(utc_dt):
+    # get integer timestamp to avoid precision lost
+    timestamp = calendar.timegm(utc_dt.timetuple())
+    local_dt = datetime.utcfromtimestamp(timestamp)
+    assert utc_dt.resolution >= timedelta(microseconds=1)
+    adjusted_time = local_dt.replace(microsecond=utc_dt.microsecond)
+    return calendar.timegm(adjusted_time.timetuple())
 
 def open_content(obj, fname, content_num=0, max_size=float('inf')):
     f, size = None, None
@@ -245,39 +256,43 @@ def open_content(obj, fname, content_num=0, max_size=float('inf')):
         f.close()       
         f = os.open(fname, os.O_RDONLY)
     attrs = {}
-    attrs['st_size'] = size
-    attrs['st_ctime'] = int(obj.created)
+    attrs['st_size'] = int(size)
+    
+    created_dt = datetime.fromtimestamp(obj.created)
+    created_timestamp = utc_to_local(created_dt)
+    attrs['st_ctime'] = created_timestamp
     if obj.edited:
-        time_edited = obj.edited
+        edited = obj.edited
     else:
-        time_edited = obj.created
-    attrs['st_mtime'] = int(time_edited)
-    attrs['st_atime'] = int(obj.created)
-    attrs['st_birthtime'] = int(obj.created)
+        edited = obj.created
+    edited_dt = datetime.fromtimestamp(edited)
+    edited_timestamp = utc_to_local(edited_dt)
+    attrs['st_mtime'] = edited_timestamp#int(time_edited)
+    attrs['st_atime'] = created_timestamp#int(obj.created)
+    attrs['st_birthtime'] = created_timestamp#int(obj.created)
     return f, attrs
 
 if __name__ == "__main__":
     r = praw.Reddit("testing /u/sweet_n_sour_curry", api_request_delay=1.0)
     #self_sub = r.get_submission(submission_id="4fwxht")
-    #pdf_sub = r.get_submission(submission_id="3ui1d4")
+    pdf_sub = r.get_submission(submission_id="4g0ink")
     #youtube_sub = r.get_submission(submission_id="4e5pmj")
-    #streamable_sub = r.get_submission(submission_id="4e8gw4")
+    #streamable_sub = r.get_submission(submission_id="4fzniz")
     #gfycat_sub = r.get_submission(submission_id="4egtz7")
     #otherlink_sub = r.get_submission(submission_id="4eg3df")
     #bad_url_sub = r.get_submission(submission_id="4fumb2")
     #imgur_sub = r.get_submission(submission_id="4ei4da")  #4eift7 gifv
-    #imgur_sub = r.get_submission(submission_id="4frmex")
-    imgur_sub_gif = r.get_submission(submission_id = "4fus57")
+    #imgur_sub_gif = r.get_submission(submission_id = "4fus57")
     #soundcloud_sub = r.get_submission(submission_id="4eaxqt")
     
     #open_content(self_sub, get_content_fnames(self_sub, 1)[0][0])
-    #open_content(pdf_sub, get_content_fnames(pdf_sub, 1)[0][0])
+    open_content(pdf_sub, get_content_fnames(pdf_sub, 1)[0][0])
     #open_content(youtube_sub, get_content_fnames(youtube_sub, 1)[0][0])
     #open_content(streamable_sub, get_content_fnames(streamable_sub, 1)[0][0])
     #open_content(gfycat_sub, get_content_fnames(gfycat_sub, 1)[0][0])
     #open_content(otherlink_sub, get_content_fnames(otherlink_sub, 1)[0][0])
     #open_content(bad_url_sub, get_content_fnames(bad_url_sub, 1)[0][0])
-    open_content(imgur_sub_gif, get_content_fnames(imgur_sub_gif, 1)[0][0])
+    #open_content(imgur_sub_gif, get_content_fnames(imgur_sub_gif, 1)[0][0])
     
     #imgur_names, ext = get_content_fnames(imgur_sub, 5)
     #open_content(imgur_sub, imgur_names[0], 0)

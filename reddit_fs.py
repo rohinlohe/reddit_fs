@@ -159,7 +159,6 @@ class RedditFS(Operations):
         under the given sort key.
         """
         submissions_name = subreddit.display_name + sort_key
-        print "SUBMISSIONS_NAME IS", submissions_name
         if submissions_name in self.seen_submissions:
             return self.seen_submissions[submissions_name]
         elif sort_key == "hot":
@@ -205,7 +204,6 @@ class RedditFS(Operations):
         searches all comment objects that are not "MoreComments" objects first,
         reducing the expected number of praw calls to be made.
         """
-        print "trying to find comment", comment_id
         if not comment_id.isalnum():
             return None
         more_comments = []
@@ -292,7 +290,6 @@ class RedditFS(Operations):
         # check if the rest of the comment parts of the path exist
         lower_comment_obj = None
         for i in range(4, len(path_pieces)):
-            print path_pieces[i]
             if len(path_pieces) == i + 1 and path_pieces[i] in self.comment_files():
                 path_objs.append(path_pieces[i])
                 return path_objs
@@ -349,7 +346,6 @@ class RedditFS(Operations):
                 content_files, ext = get_content_fnames(path_objs[-1], self.max_content_files)
                 self.content_fnames[path_objs[-1]] = content_files, ext
             for i in range(1, len(content_files) + 1):
-                print "yielding", "content" + str(i) + ext
                 yield "content" + str(i) + ext
             
             # get the comments (or replies to comments) and yield their directory names
