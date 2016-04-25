@@ -70,11 +70,12 @@ def get_content_fnames(obj, max_num_files):
     elif obj.domain == 'imgur.com' or obj.domain == 'i.imgur.com':
         return handle_imgur_names(obj, base_fname, max_num_files)
     else:
-        try:
+#        try:
             # if we won't be able to give back a content file, we will just
             # give a .txt file saying so
-            req = urllib2.urlopen(obj.url)
-        except urllib2.HTTPError:
+        req = requests.get(obj.url)
+        #except urllib2.HTTPError:
+        if req.status_code != 200:
             return [base_fname + '.txt'], '.txt'
         if req.headers['content-type'] == 'application/pdf':
             return [base_fname + '.pdf'], '.pdf'
@@ -114,7 +115,6 @@ def handle_pdf(obj, fname, max_size):
     req = requests.get(obj.url)
     f = None
     content = req.content
-    #size = req.headers['content-length']
     size = len(content)
     if size < max_size:
         f = open(fname, "wb")
@@ -203,7 +203,7 @@ def handle_gfycat(obj, fname, max_size):
 def handle_arbitrary_domain(obj, fname, max_size):
     f = None
     req = requests.get(obj.url)
-    content = req.content#.encode('utf-8')
+    content = req.content
     size = len(content)
     if size < max_size:
         f = open(fname, "wb")
@@ -267,37 +267,37 @@ def open_content(obj, fname, content_num=0, max_size=float('inf')):
         edited = obj.created
     edited_dt = datetime.fromtimestamp(edited)
     edited_timestamp = utc_to_local(edited_dt)
-    attrs['st_mtime'] = edited_timestamp#int(time_edited)
-    attrs['st_atime'] = created_timestamp#int(obj.created)
-    attrs['st_birthtime'] = created_timestamp#int(obj.created)
+    attrs['st_mtime'] = edited_timestamp
+    attrs['st_atime'] = created_timestamp
+    attrs['st_birthtime'] = created_timestamp
     return f, attrs
 
 if __name__ == "__main__":
     r = praw.Reddit("testing /u/sweet_n_sour_curry", api_request_delay=1.0)
-    #self_sub = r.get_submission(submission_id="4fwxht")
+    self_sub = r.get_submission(submission_id="4fwxht")
     pdf_sub = r.get_submission(submission_id="4g0ink")
-    #youtube_sub = r.get_submission(submission_id="4e5pmj")
-    #streamable_sub = r.get_submission(submission_id="4fzniz")
-    #gfycat_sub = r.get_submission(submission_id="4egtz7")
-    #otherlink_sub = r.get_submission(submission_id="4eg3df")
-    #bad_url_sub = r.get_submission(submission_id="4fumb2")
-    #imgur_sub = r.get_submission(submission_id="4ei4da")  #4eift7 gifv
-    #imgur_sub_gif = r.get_submission(submission_id = "4fus57")
+    youtube_sub = r.get_submission(submission_id="4e5pmj")
+    streamable_sub = r.get_submission(submission_id="4fzniz")
+    gfycat_sub = r.get_submission(submission_id="4egtz7")
+    otherlink_sub = r.get_submission(submission_id="4eg3df")
+    bad_url_sub = r.get_submission(submission_id="4fumb2")
+    imgur_sub = r.get_submission(submission_id="4ei4da")  #4eift7 gifv
+    imgur_sub_gif = r.get_submission(submission_id = "4fus57")
     #soundcloud_sub = r.get_submission(submission_id="4eaxqt")
     
-    #open_content(self_sub, get_content_fnames(self_sub, 1)[0][0])
+    open_content(self_sub, get_content_fnames(self_sub, 1)[0][0])
     open_content(pdf_sub, get_content_fnames(pdf_sub, 1)[0][0])
-    #open_content(youtube_sub, get_content_fnames(youtube_sub, 1)[0][0])
-    #open_content(streamable_sub, get_content_fnames(streamable_sub, 1)[0][0])
-    #open_content(gfycat_sub, get_content_fnames(gfycat_sub, 1)[0][0])
-    #open_content(otherlink_sub, get_content_fnames(otherlink_sub, 1)[0][0])
-    #open_content(bad_url_sub, get_content_fnames(bad_url_sub, 1)[0][0])
-    #open_content(imgur_sub_gif, get_content_fnames(imgur_sub_gif, 1)[0][0])
+    open_content(youtube_sub, get_content_fnames(youtube_sub, 1)[0][0])
+    open_content(streamable_sub, get_content_fnames(streamable_sub, 1)[0][0])
+    open_content(gfycat_sub, get_content_fnames(gfycat_sub, 1)[0][0])
+    open_content(otherlink_sub, get_content_fnames(otherlink_sub, 1)[0][0])
+    open_content(bad_url_sub, get_content_fnames(bad_url_sub, 1)[0][0])
+    open_content(imgur_sub_gif, get_content_fnames(imgur_sub_gif, 1)[0][0])
     
-    #imgur_names, ext = get_content_fnames(imgur_sub, 5)
-    #open_content(imgur_sub, imgur_names[0], 0)
-    #open_content(imgur_sub, imgur_names[1], 1)
-    #open_content(imgur_sub, imgur_names[2], 2)
-    #open_content(imgur_sub, imgur_names[3], 3)
-    #open_content(imgur_sub, imgur_names[4], 4)
+    imgur_names, ext = get_content_fnames(imgur_sub, 5)
+    open_content(imgur_sub, imgur_names[0], 0)
+    open_content(imgur_sub, imgur_names[1], 1)
+    open_content(imgur_sub, imgur_names[2], 2)
+    open_content(imgur_sub, imgur_names[3], 3)
+    open_content(imgur_sub, imgur_names[4], 4)
 
