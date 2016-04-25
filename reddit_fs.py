@@ -192,23 +192,29 @@ class RedditFS(Operations):
                                 max_comments - len(all_comments)))
         return all_comments 
 
-    def find_comment(self, comments, comment_id):
+    def find_comment(self, comments, comment_id, max_comments):
         """
         Given a list of comments and a comment id to look for, returns the
         comment object if it can find it and none if it cannot. This function
         searches all comment objects that are not "MoreComments" objects first,
         reducing the expected number of praw calls to be made.
         """
+        comments_seen = 0
         if not comment_id.isalnum():
             return None
         more_comments = []
         for comment in comments:
+            if comments_seen >= max_comments:
+                return None
             if type(comment) == praw.objects.MoreComments and comment.count > 0:
                 more_comments.append(comment)
-            elif comment.id == comment_id:
-                return comment
+            else:
+                if comment.id == comment_id:
+                    return comment
+                comments_seen += 1
         for more_comment in more_comments:
-            result = self.find_comment(more_comment.comments(), comment_id)
+            result = self.find_comment(more_comment.comments(), comment_id,
+                                       max_comments - comments_seen)
             if not result is None:
                 return result
         return None
@@ -274,7 +280,7 @@ class RedditFS(Operations):
         
         # check if the first comment part of the path exists
         comment_id = self.comment_fname_to_id(path_pieces[3])
-        comment_obj = self.find_comment(post_obj.comments, comment_id)
+        comment_obj = self.find_comment(post_obj.comments, comment_id, self.max_comments)
         if comment_obj is None:
             return None
         path_objs.append(comment_obj)
@@ -289,7 +295,7 @@ class RedditFS(Operations):
                 path_objs.append(path_pieces[i])
                 return path_objs
             comment_id = self.comment_fname_to_id(path_pieces[i])
-            lower_comment_obj = self.find_comment(comment_obj.replies, comment_id)
+            lower_comment_obj = self.find_comment(comment_obj.replies, comment_id, self.max_comments)
             if lower_comment_obj is None:
                 return None
             path_objs.append(lower_comment_obj)
